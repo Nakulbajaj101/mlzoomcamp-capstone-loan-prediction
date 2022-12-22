@@ -24,7 +24,7 @@ The section covers tools used to run the project
 7. Streamlit for prediction service app
 
 # Project structure
-![alt text](https://github.com/Nakulbajaj101/mlbookzoomcamp-midterm-stroke-prediction/blob/main/images/ProjectTree.png)
+![alt text](https://github.com/Nakulbajaj101/mlzoomcamp-capstone-loan-prediction/blob/main/images/project_structure.png)
 
 # How to run training
 

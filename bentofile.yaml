@@ -1,0 +1,14 @@
+service: "service.py:svc"
+labels:
+  owner: bentoml-loan-risk-team
+  stage: dev
+
+include:
+- "*.py"
+python:
+  packages:
+  - scikit-learn
+  - pandas
+  - xgboost
+  - pydantic
+  - feature-engine

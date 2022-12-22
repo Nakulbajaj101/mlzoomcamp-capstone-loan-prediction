@@ -10,20 +10,20 @@ MODEL_NAME = os.getenv("MODEL_NAME", "loan_approval_prediction_model")
 SERVICE_NAME = os.getenv("SERVICE_NAME", "loan_approval_prediction_classifier")
 class LoanApprovalServiceData(BaseModel):
 
-    gender : str = "male"
-    married : str = "yes"
-    dependent: str = "1",
-    education: str = "graduate",
-    self_employed: str =  "no",
-    applicantincome: int = 4583,
-    coapplicantincome: float = 1508.0,
-    loanamount: float = 128.0,
-    loan_amount_term: float = 360.0,
-    credit_history: float = 1.0,
-    property_area: str = "rural"
+    gender : str = "Male"
+    married : str = "Yes"
+    dependents: str = "1"
+    education: str = "Graduate"
+    self_employed: str =  "No"
+    applicantincome: int = 4583
+    coapplicantincome: float = 1508.0
+    loanamount: float = 128.0
+    loan_amount_term: float = 360.0
+    credit_history: float = 1.0
+    property_area: str = "Rural"
 
 
-model_ref = bentoml.xgboost.get(
+model_ref = bentoml.sklearn.get(
     tag_like=f"{MODEL_NAME}:latest"
 )
 
@@ -39,13 +39,15 @@ svc = bentoml.Service(
 
 @svc.api(input=JSON(pydantic_model=LoanApprovalServiceData), output=JSON())
 async def classify(raw_request):
-    """Function to classify and make stroke prediction"""
+    """Function to classify and make loan prediction"""
 
     app_data = pd.DataFrame(raw_request.dict(), index=[0])
     vector_processed = preprocessor.transform(app_data)
-    vector_transformed = transformer.transform(vector_processed)
 
-    prediction = await runner.predict_proba.async_run(vector_transformed)
+    vector_transformed = transformer.transform(vector_processed)
+    vector_transformed_df = pd.DataFrame(data=vector_transformed, columns=transformer.get_feature_names_out())
+    
+    prediction = await runner.predict_proba.async_run(vector_transformed_df)
     result = round(prediction[0][1],3)
 
     if result > 0.5:

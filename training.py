@@ -96,7 +96,7 @@ def get_transformer_pipeline(cat_cols: List) -> Pipeline:
     transformer_pipeline = Pipeline(
         steps=[
             ('cat_imputer',
-            CategoricalImputer(fill_value='frequent',
+            CategoricalImputer(fill_value='missing',
                                 variables=cat_cols)
             ),   
             ('rare_label_encoding',
@@ -111,7 +111,7 @@ def get_transformer_pipeline(cat_cols: List) -> Pipeline:
                 MinMaxScaler()
             ),
             ('knn_imputer',
-            KNNImputer(add_indicator=True)
+            KNNImputer()
             )
         ]
     )
@@ -147,13 +147,13 @@ def model_training(X_train: pd.DataFrame, y_train: pd.Series):
 
     # Random Forest
     rf_param_grid = { 
-        'n_estimators': [100,200,300],
-        'max_features': [None, 'sqrt', 'log2'],
-        'max_depth' : [4,5,6,7,8,10,20],
-        'min_samples_leaf' : [1,3,5,10,20],
-        'criterion' : ['gini', 'entropy'],
+        'n_estimators': [100],
+        # 'max_features': [None, 'sqrt', 'log2'],
+        # 'max_depth' : [4,5,6,7,8,10,20],
+        # 'min_samples_leaf' : [1,3,5,10,20],
+        # 'criterion' : ['gini', 'entropy'],
         'random_state' : [1], 
-        'class_weight' : ['balanced', None]
+        'class_weight' : ['balanced']
     }
 
     rf_clf = RandomForestClassifier(n_jobs=-1)
@@ -316,7 +316,14 @@ if __name__ == "__main__":
     id_col = 'loan_id'
     target = 'loan_status'
 
-    clean_strings_cols = [cols for cols in data if data[cols].dtype == 'object']
+    data_columns = [cols for cols in data if cols not in [id_col, target]]
+    X = data[data_columns].copy()
+    y = data[target].apply(lambda val: val.lower()).map({"y":1, "n":0})
+
+    logging.info("Splitting the data into train and test")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=1)
+
+    clean_strings_cols = [cols for cols in data if data[cols].dtype == 'object' and cols not in [id_col, target]]
 
     data_mapping_cols = ['graduate', 'property_area']
 
@@ -365,22 +372,18 @@ if __name__ == "__main__":
                                                     gender_encoder_value=gender_encoder_value)
 
     logging.info("Running the preprocessor")
-    preprocessed_data = preprocessor_pipeline.fit_transform(data)
+    X_train_preprocessed_data = preprocessor_pipeline.fit_transform(X_train)
+    X_test_preprocessed_data = preprocessor_pipeline.transform(X_test)
 
-    feature_cols = [cols for cols in preprocessed_data if cols not in [id_col, target]]
-    cat_cols = [cols for cols in feature_cols if preprocessed_data[cols].dtype == 'object']
-    X = preprocessed_data[feature_cols].copy()
-    y = preprocessed_data[target].map({'y':1, 'n':0})
-
-    logging.info("Splitting the data into train and test")
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=1)
-
+    feature_cols = [cols for cols in X_train_preprocessed_data]
+    cat_cols = [cols for cols in feature_cols if X_train_preprocessed_data[cols].dtype == 'object']
+    
     logging.info("Defining data transformation pipelines")
     transformer_pipeline = get_transformer_pipeline(cat_cols=cat_cols)
     
     logging.info("Running the transformer")
-    transformed_data_train = transformer_pipeline.fit_transform(X_train, y_train)
-    transformed_data_test = transformer_pipeline.transform(X_test)
+    transformed_data_train = transformer_pipeline.fit_transform(X_train_preprocessed_data)
+    transformed_data_test = transformer_pipeline.transform(X_test_preprocessed_data)
 
     X_train_transformed = pd.DataFrame(data=transformed_data_train, columns=transformer_pipeline.get_feature_names_out())
     X_test_transformed = pd.DataFrame(data=transformed_data_test, columns=transformer_pipeline.get_feature_names_out())

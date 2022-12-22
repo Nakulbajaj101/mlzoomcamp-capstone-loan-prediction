@@ -9,5 +9,6 @@ python:
   packages:
   - scikit-learn
   - pandas
+  - xgboost
   - pydantic
   - feature-engine

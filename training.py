@@ -148,10 +148,10 @@ def model_training(X_train: pd.DataFrame, y_train: pd.Series):
     # Random Forest
     rf_param_grid = { 
         'n_estimators': [100],
-        # 'max_features': [None, 'sqrt', 'log2'],
-        # 'max_depth' : [4,5,6,7,8,10,20],
-        # 'min_samples_leaf' : [1,3,5,10,20],
-        # 'criterion' : ['gini', 'entropy'],
+        'max_features': [None, 'sqrt', 'log2'],
+        'max_depth' : [4,5,6,7,8,10,20],
+        'min_samples_leaf' : [1,3,5,10,20],
+        'criterion' : ['gini', 'entropy'],
         'random_state' : [1], 
         'class_weight' : ['balanced']
     }

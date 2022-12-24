@@ -411,9 +411,7 @@ if __name__ == "__main__":
     X_train_transformed = feature_pipeline.fit_transform(X_train_imputed)
     X_test_transformed = feature_pipeline.transform(X_test_imputed)
 
-    logging.info(X_test_transformed.head())
-
-    logging.info("Training the four models and hypertuning")
+    logging.info("Training the three models and hypertuning")
     d_tree_clf, rf_clf, xgb_clf = model_training(X_train=X_train_transformed, y_train=y_train)
 
     logging.info("Selecting the best model")
@@ -428,5 +426,5 @@ if __name__ == "__main__":
     create_bento(best_model=best_model, 
                  preprocessor=preprocessor_pipeline,
                  imputator=imputation_pipeline,
-                 transformer=imputation_pipeline
+                 transformer=feature_pipeline
                  )

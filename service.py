@@ -23,11 +23,12 @@ class LoanApprovalServiceData(BaseModel):
     property_area: str = "Rural"
 
 
-model_ref = bentoml.xgboost.get(
+model_ref = bentoml.sklearn.get(
     tag_like=f"{MODEL_NAME}:latest"
 )
 
 preprocessor = model_ref.custom_objects["preprocessor"]
+imputator = model_ref.custom_objects["imputator"]
 transformer = model_ref.custom_objects["transformer"]
 
 runner = model_ref.to_runner()
@@ -44,8 +45,9 @@ async def classify(raw_request):
     app_data = pd.DataFrame(raw_request.dict(), index=[0])
     vector_processed = preprocessor.transform(app_data)
 
-    vector_transformed = transformer.transform(vector_processed)
-    vector_transformed_df = pd.DataFrame(data=vector_transformed, columns=transformer.get_feature_names_out())
+    vector_imputed = imputator.transform(vector_processed)
+    vector_imputed_df = pd.DataFrame(data=vector_imputed, columns=imputator.get_feature_names_out())
+    vector_transformed_df = transformer.transform(vector_imputed_df)
 
     prediction = await runner.predict_proba.async_run(vector_transformed_df)
     result = round(prediction[0][1],3)

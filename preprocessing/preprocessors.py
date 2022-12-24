@@ -173,3 +173,24 @@ class PrefixStringEncoding(BaseEstimator, TransformerMixin):
             X[col] = X[col].apply(lambda val: f"{self.string_val}_{int(val/12)}" if str(val) != 'nan' else val)
 
         return X
+
+class GreaterThanBinaryEncoding(BaseEstimator, TransformerMixin):
+
+    def __init__(self, column_list: List[str], greater_than: float, column_suffix: str):
+
+        self.column_list = column_list
+        self.greater_than = greater_than
+        self.column_suffix = column_suffix
+
+    def fit(self, X, y=None):
+        """Custom fit function"""
+
+        return self 
+
+    def transform(self, X, y=None) -> pd.DataFrame:
+        """Custom transformer to update data values"""
+
+        for col in self.column_list:
+            X[f"{col}_greater_than_{self.column_suffix}"] = X[col].apply(lambda val: 1 if val > self.greater_than else 0)
+
+        return X

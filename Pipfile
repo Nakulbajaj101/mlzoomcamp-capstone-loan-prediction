@@ -15,6 +15,7 @@ seaborn = "*"
 feature-engine = "*"
 requests = "*"
 pydantic = "*"
+bentoctl = "*"
 
 [dev-packages]
 ipykernel = "*"

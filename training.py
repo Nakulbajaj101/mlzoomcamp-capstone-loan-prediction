@@ -3,23 +3,23 @@ import os
 from typing import List
 
 import bentoml
-import numpy as np
 import pandas as pd
 import xgboost as xgb
+from feature_engine.creation import MathFeatures, RelativeFeatures
 from feature_engine.encoding import OneHotEncoder, RareLabelEncoder
 from feature_engine.imputation.categorical import CategoricalImputer
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.impute import KNNImputer
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestClassifier
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GridSearchCV, train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import MinMaxScaler
 from sklearn.tree import DecisionTreeClassifier
 
 from preprocessing.preprocessors import (BinaryEncoder, CleanStrings,
                                          CustomColumnMapping, CustomRowMapping,
                                          DivideColumnValue,
+                                         GreaterThanBinaryEncoding,
                                          MultiplyColumnValue,
                                          PrefixStringEncoding)
 
@@ -90,33 +90,65 @@ def get_preprocessor_pipeline(clean_strings_cols: List, column_mappings: dict, t
     return preprocessor_pipeline
 
 
-def get_transformer_pipeline(cat_cols: List) -> Pipeline:
+def get_imputation_pipeline(cat_cols: List) -> Pipeline:
     """Function to define transformer pipeline"""
 
-    transformer_pipeline = Pipeline(
+    imputation_pipeline = Pipeline(
         steps=[
-            ('cat_imputer',
-            CategoricalImputer(fill_value='missing',
-                                variables=cat_cols)
+            (
+                'cat_imputer',
+                CategoricalImputer(fill_value='missing',
+                                   variables=cat_cols)
             ),   
-            ('rare_label_encoding',
-            RareLabelEncoder(tol=0.01,
-                            n_categories=8,
-                            variables=cat_cols)
+            (
+                'rare_label_encoding',
+                RareLabelEncoder(tol=0.01,
+                                 n_categories=8,
+                                 variables=cat_cols)
             ),
-            ('ohe_encoding',
-            OneHotEncoder(variables=cat_cols)
+            (   
+                'ohe_encoding',
+                OneHotEncoder(variables=cat_cols)
             ),
-            ('scaling_data',
-                MinMaxScaler()
+            (   
+                'iterative_imputer',
+                IterativeImputer(estimator=ExtraTreesRegressor(bootstrap=True,
+                                                               n_jobs=-1,
+                                                               random_state=1),
+                                 initial_strategy="median",
+                                 random_state=1,
+                                 max_iter=20)
+            )]
+    )
+
+    return imputation_pipeline
+
+def feature_creation_pipeline(math_features: List, reference_column: str, greater_than_val: float, column_suffix: str) -> Pipeline:
+    
+    feature_creation_pipeline = Pipeline(
+        steps=[
+            ( 
+                'create_total_income_feature',
+                MathFeatures(variables=math_features,
+                             func=["sum"])
+
             ),
-            ('knn_imputer',
-            KNNImputer()
+            (
+                'create_income_loan_ratio',
+                RelativeFeatures(variables=[f"sum_{math_features[0]}_{math_features[1]}"],
+                                 reference=[reference_column],
+                                 func=["div"])
+            ),
+            (
+                'income_loan_ratio_greater_than_flag',
+                GreaterThanBinaryEncoding(column_list=[f"sum_{math_features[0]}_{math_features[1]}_div_{reference_column}"],
+                                          greater_than=greater_than_val,
+                                          column_suffix=column_suffix)
             )
         ]
     )
 
-    return transformer_pipeline
+    return feature_creation_pipeline
 
 
 def model_training(X_train: pd.DataFrame, y_train: pd.Series):
@@ -133,18 +165,6 @@ def model_training(X_train: pd.DataFrame, y_train: pd.Series):
     }
     d_clf = DecisionTreeClassifier()
 
-
-    # Logistic Regression
-    lr_param_grid = {
-        "C":np.logspace(-3,3,7), 
-        "max_iter": [500, 1000,2000, 5000],
-        'class_weight' : ['balanced', None],
-        'random_state' : [1]
-        } 
-        
-    lr_clf = LogisticRegression()
-
-
     # Random Forest
     rf_param_grid = { 
         'n_estimators': [100],
@@ -153,7 +173,7 @@ def model_training(X_train: pd.DataFrame, y_train: pd.Series):
         'min_samples_leaf' : [1,3,5,10,20],
         'criterion' : ['gini', 'entropy'],
         'random_state' : [1], 
-        'class_weight' : ['balanced']
+        'class_weight' : [None, 'balanced']
     }
 
     rf_clf = RandomForestClassifier(n_jobs=-1)
@@ -163,7 +183,7 @@ def model_training(X_train: pd.DataFrame, y_train: pd.Series):
         'eta': [0.05, 0.1, 0.2],
         'max_depth': [4,5,6,7,8,10,20],
         'min_child_weight': [1,3,5,10,20],
-        'n_estimators': [5, 10, 20, 50],
+        'n_estimators': [5, 10, 20, 50, 100],
         'objective':['binary:logistic'],
         'seed': [1],
         'verbosity': [1]
@@ -176,11 +196,6 @@ def model_training(X_train: pd.DataFrame, y_train: pd.Series):
 
     logging.info("Decision tree optimised")
 
-    lr_clf_cv = GridSearchCV(estimator=lr_clf, param_grid=lr_param_grid, cv=5, scoring='roc_auc')
-    lr_clf_cv.fit(X_train, y_train)
-
-    logging.info("Logistic regression optimised")
-
     rf_clf_cv = GridSearchCV(estimator=rf_clf, param_grid=rf_param_grid, cv=5, scoring='roc_auc')
     rf_clf_cv.fit(X_train, y_train)
 
@@ -191,28 +206,24 @@ def model_training(X_train: pd.DataFrame, y_train: pd.Series):
 
     logging.info("xgboost classifier optimised")
 
-    lr_best_params = lr_clf_cv.best_params_
     d_best_params = d_clf_cv.best_params_
     rf_best_params = rf_clf_cv.best_params_
     xgb_best_params = xgb_clf_cv.best_params_
 
     logging.info("Training the best models")
-    lr_best_clf = LogisticRegression(**lr_best_params)
     d_best_clf = DecisionTreeClassifier(**d_best_params)
     rf_best_clf = RandomForestClassifier(**rf_best_params)
     xgb_best_clf = xgb.XGBClassifier(**xgb_best_params)
 
-    lr_best_clf.fit(X_train, y_train)
     d_best_clf.fit(X_train, y_train)
     rf_best_clf.fit(X_train, y_train)
     xgb_best_clf.fit(X_train, y_train)
 
-    return d_best_clf, lr_best_clf, rf_best_clf, xgb_best_clf
+    return d_best_clf, rf_best_clf, xgb_best_clf
 
 
 
 def select_best_model(d_tree_clf: DecisionTreeClassifier,
-                      log_reg_clf: LogisticRegression,
                       xgb_clf: xgb.XGBClassifier,
                       rf_clf: RandomForestClassifier,
                       X_test: pd.DataFrame,
@@ -232,7 +243,6 @@ def select_best_model(d_tree_clf: DecisionTreeClassifier,
     y_test = y_test.copy()
 
     d_roc_auc = evaluate_roc(d_tree_clf, X_val=X_test, y_val=y_test)
-    lr_roc_auc = evaluate_roc(log_reg_clf, X_val=X_test, y_val=y_test)
     rf_roc_auc = evaluate_roc(rf_clf, X_val=X_test, y_val=y_test)
     xgb_roc_auc = evaluate_roc(xgb_clf, X_val=X_test, y_val=y_test)
 
@@ -249,10 +259,6 @@ def select_best_model(d_tree_clf: DecisionTreeClassifier,
         "random_forest" : {
             "model" : rf_clf,
             "roc_auc" : rf_roc_auc
-        },
-        "logistic_regression" : {
-            "model" : log_reg_clf,
-            "roc_auc" : lr_roc_auc
         }
     }
 
@@ -263,7 +269,7 @@ def select_best_model(d_tree_clf: DecisionTreeClassifier,
     return best_model
 
 
-def create_bento(best_model: tuple, preprocessor: Pipeline, transformer: Pipeline):
+def create_bento(best_model: tuple, preprocessor: Pipeline, imputator: Pipeline, transformer: Pipeline):
     """Function to create bento"""
 
     if best_model[0] == 'xgboost':
@@ -275,6 +281,7 @@ def create_bento(best_model: tuple, preprocessor: Pipeline, transformer: Pipelin
         model=model,
         custom_objects={
             "preprocessor": preprocessor,
+            "imputator": imputator,
             "transformer": transformer
         },
         signatures={
@@ -293,6 +300,7 @@ def create_bento(best_model: tuple, preprocessor: Pipeline, transformer: Pipelin
         model=model,
         custom_objects={
             "preprocessor": preprocessor,
+            "imputator": imputator,
             "transformer": transformer
         },
         signatures={
@@ -354,6 +362,11 @@ if __name__ == "__main__":
                         'semiurban': 'semi_urban',
                         'urban': 'urban'}}
 
+    math_features = ["applicant_income", "co_application_income"]
+    reference_column = "loan_amount"
+    greater_than_val = 0.027
+    column_suffix = "027"
+
 
     
 
@@ -378,22 +391,33 @@ if __name__ == "__main__":
     feature_cols = [cols for cols in X_train_preprocessed_data]
     cat_cols = [cols for cols in feature_cols if X_train_preprocessed_data[cols].dtype == 'object']
     
-    logging.info("Defining data transformation pipelines")
-    transformer_pipeline = get_transformer_pipeline(cat_cols=cat_cols)
+    logging.info("Defining data imputation and encoding pipelines")
+    imputation_pipeline = get_imputation_pipeline(cat_cols=cat_cols)
     
-    logging.info("Running the transformer")
-    transformed_data_train = transformer_pipeline.fit_transform(X_train_preprocessed_data)
-    transformed_data_test = transformer_pipeline.transform(X_test_preprocessed_data)
+    logging.info("Running the encoder and imputation")
+    imputed_data_train = imputation_pipeline.fit_transform(X_train_preprocessed_data)
+    imputed_data_test = imputation_pipeline.transform(X_test_preprocessed_data)
 
-    X_train_transformed = pd.DataFrame(data=transformed_data_train, columns=transformer_pipeline.get_feature_names_out())
-    X_test_transformed = pd.DataFrame(data=transformed_data_test, columns=transformer_pipeline.get_feature_names_out())
+    X_train_imputed = pd.DataFrame(data=imputed_data_train, columns=imputation_pipeline.get_feature_names_out())
+    X_test_imputed = pd.DataFrame(data=imputed_data_test, columns=imputation_pipeline.get_feature_names_out())
+
+    logging.info("Running feature creation pipeline")
+    feature_pipeline = feature_creation_pipeline(
+        math_features=math_features,
+        reference_column=reference_column,
+        greater_than_val=greater_than_val,
+        column_suffix=column_suffix
+    )
+    X_train_transformed = feature_pipeline.fit_transform(X_train_imputed)
+    X_test_transformed = feature_pipeline.transform(X_test_imputed)
+
+    logging.info(X_test_transformed.head())
 
     logging.info("Training the four models and hypertuning")
-    d_tree_clf, log_reg_clf, rf_clf, xgb_clf = model_training(X_train=X_train_transformed, y_train=y_train)
+    d_tree_clf, rf_clf, xgb_clf = model_training(X_train=X_train_transformed, y_train=y_train)
 
     logging.info("Selecting the best model")
     best_model = select_best_model(d_tree_clf=d_tree_clf,
-                                   log_reg_clf=log_reg_clf,
                                    xgb_clf=xgb_clf,
                                    rf_clf=rf_clf,
                                    X_test=X_test_transformed,
@@ -401,4 +425,8 @@ if __name__ == "__main__":
 
 
     logging.info("Preparing the bento")
-    create_bento(best_model=best_model, preprocessor=preprocessor_pipeline, transformer=transformer_pipeline)
+    create_bento(best_model=best_model, 
+                 preprocessor=preprocessor_pipeline,
+                 imputator=imputation_pipeline,
+                 transformer=imputation_pipeline
+                 )
